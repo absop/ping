@@ -127,24 +127,24 @@ class Pinger(object):
         args = self._check_args(addrs, count, interval, timeout)
         send = self._send_icmp_echo_request
         recv = self._recv_icmp_echo_replies
-        send_proto = proto.ECHO_REQUEST
-        recv_proto = proto.ECHO_REPLY
+        send_type = proto.ECHO_REQUEST
+        recv_type = proto.ECHO_REPLY
         replies, no_replies = {}, []
         remaining_time = timeout + (count - 1) * interval
         thread = threading.Thread(target=recv,
-            args=(sock, recv_proto, replies, remaining_time, args)
+            args=(sock, recv_type, replies, remaining_time, args)
             )
         thread.start()
         for seq in args.seq_range:
             for addr in args.addr_set:
-                send(sock, send_proto, addr, seq)
+                send(sock, send_type, addr, seq)
             if seq < count:
                 sleep(interval)
         end_time = _get_curr_time() + timeout
         thread.join()
         remaining_time = end_time - _get_curr_time()
         if remaining_time > self.delay and args.waiting_replies:
-            recv(sock, recv_proto, replies, remaining_time, args)
+            recv(sock, recv_type, replies, remaining_time, args)
         for addr in args.addr_set:
             if addr in replies:
                 replies[addr] = {'replies': replies[addr]}
@@ -231,7 +231,7 @@ class Pinger(object):
 
         return s
 
-    def _send_icmp_echo_request(self, sock, proto, dest_address, seq_number):
+    def _send_icmp_echo_request(self, sock, ipcmtyp, dest_address, seq_number):
         """
         Send an ICMP Echo message to the given address.
 
@@ -257,19 +257,17 @@ class Pinger(object):
         """
         payload = struct.pack('!d', _get_curr_time())
         icmp_header = struct.pack('!BBHHH',
-                                  proto, 0, 0, self.pid, seq_number & 0xffff)
+                                  ipcmtyp, 0, 0, self.pid, seq_number & 0xffff)
         packet = bytearray(icmp_header + payload)
         checksum = self._checksum(packet)
         packet[2:4:] = struct.pack('!H', checksum)
-        if proto == self.ICMPv6.ECHO_REPLY:
-            socket.inet_pton(socket.AF_INET6, dest_address)
         try:
             sock.sendto(packet, (dest_address, 0))
         except Exception:
             pass
 
-    def _recv_icmp_echo_replies(self, sock, proto, replies, timeout, args):
-        if proto == self.ICMPv4.ECHO_REPLY:
+    def _recv_icmp_echo_replies(self, sock, ipcmtyp, replies, timeout, args):
+        if ipcmtyp == self.ICMPv4.ECHO_REPLY:
             offset, end = 20, 36
         else:
             offset, end = 0, 16
@@ -285,7 +283,7 @@ class Pinger(object):
                     _type, _, _, pkt_id, seq, sent_time = struct.unpack(
                         '!BBHHHd', pkt[offset:end]
                     )
-                    if _type == proto and pkt_id == self.pid:
+                    if _type == ipcmtyp and pkt_id == self.pid:
                         time = receive_time - sent_time
                         addr = address[0]
                         if addr not in dest_addresses:
